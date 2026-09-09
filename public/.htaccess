@@ -1,0 +1,91 @@
+# LiteSpeed & Apache Production Configuration for Run On Console (ROC)
+DirectoryIndex index.html index.php
+
+# Security Guard: Block public HTTP access to sensitive files, database dumps, logs & migrations
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Block public access to database dumps, SQL files, migrations, log files, manifests and configs
+  RewriteRule ^database\.sql$ - [F,L,NC]
+  RewriteRule ^release-manifest\.json$ - [F,L,NC]
+  RewriteRule ^migrations(/.*)?$ - [F,L,NC]
+  RewriteRule ^api/v1/cron(/.*)?$ - [F,L,NC]
+  RewriteRule ^env\.example\.php$ - [F,L,NC]
+  RewriteRule \.(sql|log|env|yml|yaml|sh|git|htaccess|config)$ - [F,L,NC]
+
+  # 1. Permanent 301 Redirect: WWW to Non-WWW
+  RewriteCond %{HTTP_HOST} ^www\.runonconsole\.com$ [NC]
+  RewriteRule ^(.*)$ https://runonconsole.com/$1 [R=301,L]
+
+  # 2. Force HTTPS / SSL
+  RewriteCond %{HTTPS} off
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+  # 3. Direct API Access Bypass
+  RewriteCond %{REQUEST_URI} ^/api/ [NC]
+  RewriteRule ^ - [L]
+
+  # 3b. Auth Route Aliases (e.g. /login -> /auth/login/, /signup -> /auth/signup/, /register -> /auth/signup/)
+  RewriteRule ^login/?$ /auth/login/ [R=301,L]
+  RewriteRule ^signup/?$ /auth/signup/ [R=301,L]
+  RewriteRule ^register/?$ /auth/signup/ [R=301,L]
+
+  # 4. If actual file or directory exists on disk, serve it natively
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 5. Serve pre-rendered static route index.html if available
+  RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI}index.html -f
+  RewriteRule ^(.*)$ %{REQUEST_URI}index.html [L]
+
+  # 6. Genuine Server-Side HTTP 404 Status Response for Unknown Non-Existent Routes
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ - [R=404,L]
+</IfModule>
+
+# Custom Error Document returning genuine HTTP 404 status code with /404.html template
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+# Deny access to sensitive extensions via mod_authz_core / FilesMatch
+<FilesMatch "\.(sql|log|env|example|yml|yaml|sh|git|htaccess|config)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# Security, Robots & Content-Type Headers
+<IfModule mod_headers.c>
+  # Enforce UTF-8 plain text content type for robots.txt and llms.txt
+  <FilesMatch "^(robots\.txt|llms\.txt)$">
+    Header set Content-Type "text/plain; charset=utf-8"
+  </FilesMatch>
+
+  # Enforce application/xml content type for XML sitemaps
+  <FilesMatch "\.xml$">
+    Header set Content-Type "application/xml; charset=utf-8"
+  </FilesMatch>
+
+  # Apply X-Robots-Tag: noindex, nofollow to private routes & API endpoints
+  <IfModule mod_setenvif.c>
+    SetEnvIf Request_URI "^/(admin|auth|profile|api)" PRIVATE_ROUTE
+    Header set X-Robots-Tag "noindex, nofollow" env=PRIVATE_ROUTE
+  </IfModule>
+
+  # General Security Headers
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Gzip Compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
